@@ -132,6 +132,17 @@ void print_robot(struct Robot *r) {
     printf("############\n");
 }
 
+
+double rad2deg(double rad) {
+	return (rad*180)/PI;
+}
+double abs_f(double v) {
+	if (v < 0){
+    	return v*-1.0;
+    }
+    return v;
+}
+
 /*
 ** Function:    robot_drive
 ** ----------------------
@@ -148,12 +159,17 @@ void robot_drive(struct Robot *r, int speed, double cm) {
     // proboably need to do some manipulation on cm to convert from cm's
     // to motor ticks. Probably based on wheel size? and maybe speed.
     // "There are approximately 1500 ticks per motor revolution"
-    int N = 1500; // num ticks in 1 full rotation of wheels
+    int N = 2000; // num ticks in 1 full rotation of wheels
     double circumfrence = 22.0; // cm
     int ticks = (int)((N/circumfrence)*cm); // ~ 68ticks per cm
+    printf("moving  speed:%d  ticks:%d  cm:%f\n", speed, ticks, cm);
     move_relative_position(0, speed, ticks);
     move_relative_position(1, speed, ticks);
-
+    //speed is ticks/sec
+    //msleep((int)(1000*speed/ticks));
+	bmd(0);
+    bmd(1);
+    
     r->x += cm*cos(r->theta);
     r->y += cm*sin(r->theta);
     return;
@@ -176,9 +192,9 @@ void robot_drive(struct Robot *r, int speed, double cm) {
 */
 void robot_turn(struct Robot *r, int speed, double d_angle, bool isRelative) {
     if (!isRelative) {
-        d_angle = (double)((int)(180*d_angle/PI) % 180);
+        d_angle = (double)((int)(180*d_angle/PI) % 360);
         d_angle *= PI/180;
-        if (abs(d_angle) > PI) { // take shortest turn
+        if (abs_f(d_angle) > PI) { // take shortest turn
             d_angle += (d_angle > 0) ? -PI : PI;
             d_angle *= -1;
         }
@@ -190,10 +206,17 @@ void robot_turn(struct Robot *r, int speed, double d_angle, bool isRelative) {
     // "There are approximately 1500 ticks per motor revolution"
     int Ldir = (d_angle < 0) ? 1 : -1;
     int Rdir = -Ldir;
-    int N = 1500; // N is total num ticks in 1 full rotation of wheels
-    int ticks = (int)(N*abs(d_angle)/PI);
+    double N = 2000.0; // N is total num ticks in 1 full rotation of wheels
+    //printf("TICK %f\n", 2.0*N*abs(d_angle)/PI);
+    int ticks = (int)(2.0*N*abs_f(d_angle)/PI); 
+    printf("turning %f  speed:%d  ticks:%d  Ldir:%d  Rdir:%d\n",rad2deg(d_angle), speed, ticks, Ldir, Rdir);
     move_relative_position(0, speed, ticks*Ldir);
     move_relative_position(1, speed, ticks*Rdir);
+    
+    //speed is ticks/sec
+    //msleep((int)(1000*speed/ticks));
+    bmd(0);
+    bmd(1);
 
     r->theta += d_angle;
     return;
@@ -493,25 +516,28 @@ int main(int argc, char* argv[]) {
     struct Robot r;
     r.x=0;
     r.y=0;
-    r.theta=PI; // starts facing 'upwards' in world frame
+    r.theta=PI/2; // starts facing 'upwards' in world frame
 
-    robot_turn(&r, 30, PI/2, true); // SHOULD TURN 90deg LEFT
-    msleep(5000);
-    robot_drive(&r, 30, 10); // SHOULD DRIVE FORWARD 10cm
-    print_robot(&r); // SHOULD BE (-10, 0), 3.14 (90deg); (facing 'left')
+    
+    printf("case1\n");
+    robot_turn(&r, 300, PI/2, true); // SHOULD TURN 90deg LEFT
+    robot_drive(&r, 300, 10); // SHOULD DRIVE FORWARD 10cm
+    print_robot(&r); // SHOULD BE (-10, 0), 3.14 (180deg); (facing 'left')
     msleep(4000);
 
-    robot_turn(&r, 30, PI/2, false); // SHOULD TURN TO FACE 'upwards'
-    robot_turn(&r, 30, -PI/6, true); // SHOULD TURN 30deg RIGHT
-    robot_drive(&r, 30, 20); // SHOULD DRIVE FORWARDS 20cm
+    printf("case2\n");
+    robot_turn(&r, 300, PI/2, false); // SHOULD TURN TO FACE 'upwards' (90deg relative)
+    robot_turn(&r, 300, -PI/6, true); // SHOULD TURN 30deg RIGHT (
+    robot_drive(&r, 300, 20); // SHOULD DRIVE FORWARDS 20cm
     print_robot(&r); // SHOULD BE (0, 17.3), 1.04 (60deg); (facing /^ this way)
     msleep(4000);
 
-    robot_turn(&r, 30, 3*PI/2, false); // SHOULD TURN TO FACE 'downwards'
-    robot_drive(&r, 30, -10); // SHOULD DRIVE BACKWARDS 10cm
+    printf("case3\n");
+    robot_turn(&r, 300, 3*PI/2, false); // SHOULD TURN TO FACE 'downwards'
+    robot_drive(&r, 300, -10); // SHOULD DRIVE BACKWARDS 10cm
     print_robot(&r); // SHOULD BE (0, 7.3), -0.78 (-90deg); (facing 'down')
-    msleep(4000);
-
+    
+    
     /*
     // PART 1 LAB 4
     seek_color(color_seek);
