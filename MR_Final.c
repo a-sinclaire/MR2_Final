@@ -31,7 +31,7 @@
 **      16Nov2021   Sam Laderoute   Created Loaction struct to hold destinations and obstacles
 **                                  Created Robot struct to handle robot pos and internal sensing
 **                                  Added functions to move robot precisly through the world
-**                                  
+**                                  Added function to grab trash located in front of robot (iffy)
 **
 */
 
@@ -124,6 +124,15 @@ struct Robot {
     struct Location obstacles[10];
 };
 
+/*
+** Function:    print_robot
+** ----------------------
+** prints status of given robot
+**
+** r: the robot
+**
+** returns: void
+*/
 void print_robot(struct Robot *r) {
     printf("############\n");
     printf("ROBOT STATE\n");
@@ -132,10 +141,28 @@ void print_robot(struct Robot *r) {
     printf("############\n");
 }
 
-
+/*
+** Function:    rad2deg
+** ----------------------
+** converts radians to degrees
+**
+** rad: angle in radians
+**
+** returns: angle in degrees
+*/
 double rad2deg(double rad) {
 	return (rad*180)/PI;
 }
+
+/*
+** Function:    abs_f
+** ----------------------
+** absolute value that works with floats
+**
+** v: value (float)
+**
+** returns: absolute value of value
+*/
 double abs_f(double v) {
 	if (v < 0){
     	return v*-1.0;
@@ -156,20 +183,19 @@ double abs_f(double v) {
 ** returns: void
 */
 void robot_drive(struct Robot *r, int speed, double cm) {
-    // proboably need to do some manipulation on cm to convert from cm's
-    // to motor ticks. Probably based on wheel size? and maybe speed.
-    // "There are approximately 1500 ticks per motor revolution"
+    // "There are approximately 1500 ticks per motor revolution" -- actually it 2k
     int N = 2000; // num ticks in 1 full rotation of wheels
     double circumfrence = 22.0; // cm
-    int ticks = (int)((N/circumfrence)*cm); // ~ 68ticks per cm
-    printf("moving  speed:%d  ticks:%d  cm:%f\n", speed, ticks, cm);
+    int ticks = (int)((N/circumfrence)*cm); // ~ 90ticks per cm
+    //printf("moving  speed:%d  ticks:%d  cm:%f\n", speed, ticks, cm);
     move_relative_position(0, speed, ticks);
     move_relative_position(1, speed, ticks);
-    //speed is ticks/sec
-    //msleep((int)(1000*speed/ticks));
-	bmd(0);
-    bmd(1);
+	
+    // wait for movement to complete
+    while(!get_motor_done(0) || !get_motor_done(1)){
+    }
     
+    // update robot pos
     r->x += cm*cos(r->theta);
     r->y += cm*sin(r->theta);
     return;
@@ -192,7 +218,7 @@ void robot_drive(struct Robot *r, int speed, double cm) {
 */
 void robot_turn(struct Robot *r, int speed, double d_angle, bool isRelative) {
     if (!isRelative) {
-        d_angle = (double)((int)(180*d_angle/PI) % 360);
+        d_angle = (double)((int)((180*5*d_angle)/(PI*5)) % 360); // *5 is to increase fidelty of cast
         d_angle *= PI/180;
         if (abs_f(d_angle) > PI) { // take shortest turn
             d_angle += (d_angle > 0) ? -PI : PI;
@@ -201,23 +227,20 @@ void robot_turn(struct Robot *r, int speed, double d_angle, bool isRelative) {
         d_angle -= r->theta;
     }
 
-    // proboably need to do some manipulation on d_angle to convert from radians
-    // to motor ticks. probably based on wheel size? maybe speed.
-    // "There are approximately 1500 ticks per motor revolution"
+    // "There are approximately 1500 ticks per motor revolution" -- actually it 2k
     int Ldir = (d_angle < 0) ? 1 : -1;
     int Rdir = -Ldir;
-    double N = 2000.0; // N is total num ticks in 1 full rotation of wheels
-    //printf("TICK %f\n", 2.0*N*abs(d_angle)/PI);
-    int ticks = (int)(2.0*N*abs_f(d_angle)/PI); 
-    printf("turning %f  speed:%d  ticks:%d  Ldir:%d  Rdir:%d\n",rad2deg(d_angle), speed, ticks, Ldir, Rdir);
+    double N = 2000.0 * 1.35; // N is total num ticks in 1 full rotation of robot ### idk why i need constant 1.35 (i made up)
+    int ticks = (int)(N*abs_f(d_angle)/PI);
+    //printf("turning %f  speed:%d  ticks:%d  Ldir:%d  Rdir:%d\n",rad2deg(d_angle), speed, ticks, Ldir, Rdir);
     move_relative_position(0, speed, ticks*Ldir);
     move_relative_position(1, speed, ticks*Rdir);
     
-    //speed is ticks/sec
-    //msleep((int)(1000*speed/ticks));
-    bmd(0);
-    bmd(1);
+    // wait for movement to complete
+	while(!get_motor_done(0) || !get_motor_done(1)){
+    }
 
+    // update robot angle
     r->theta += d_angle;
     return;
 }
@@ -372,110 +395,17 @@ void drive(int mdur, int speed){
 **
 ** returns: false if blob is within goldilocks zone. true if still turning.
 */
-bool turn_to_blob(struct Blob b, double goldilocks) {
+bool turn_to_blob(struct Robot *r, struct Blob b, double goldilocks) {
     if (b.x < WIDTH/2 - WIDTH*goldilocks/2) { // blob is too far left
-        turn(1, -1, 8); //turn(1, 50, 50);  // turn left
+        robot_turn(r, 100, 0.03, true); // turn left
         return true;
     } else if (b.x > WIDTH/2 + WIDTH*goldilocks/2) { // blob is too far right
-        turn(-1, -1, 8); //turn(-1, 50, 50);  // turn right
+        robot_turn(r, 100, -0.03, true);  // turn right
         return true;
     } else {  // within goldilocks zone
-        halt();
+        //halt();
         return false;
     }
-}
-
-/*
-** Function:    seek_color
-** ----------------------
-** Takes an image of the environment. Determines where
-**      the blobs of color are. Compiles them into a list.
-**      Combines close blobs. Then turns to face the largest,
-**      and drives forward until no blobs are found.
-**      If no color blob initially seen, searches for color blob.
-**      
-** channel: int that determines what color channel we are seeking (what color?)_
-**
-** returns: void when arrived at desired color
-*/
-void seek_color(int channel){
-    // printf("Searching for Color [channel: %d]\n", channel);
-    bool color_found = false;
-    int color_count = 0; // counts consecutive frames blob appears
-    int count = 0; // counts connsecutive frames w/ no blobs
-    // Opens the connection to the black camera
-    if (camera_open_black() == 0) {
-        printf("camera failure!\n");
-    }
-
-    while(true) {
-        // take snapshot
-        count++;
-        if (camera_update() == 0) {
-        	printf("snapshot failed!");
-        }
-
-        // SEARCH FOR PARTICULAR COLOR
-        int n_blobs = get_object_count(channel);
-        if(n_blobs > 0) {  // does the camera see at least 1 blob?
-            count = 0; // rest num of tries we take imgs looking
-            if (color_found == false) {
-                color_count++;
-                if (color_count > 5) {  // if blob exists for more than 5 consecutive frames
-                    // printf("Found Color [channel: %d]\n", channel);
-                    color_found = true;
-                    color_count = 0;
-                }
-            }
-            // build array of Blobs
-            int i = 0;
-            struct Blob A[n_blobs];
-            while (i < n_blobs) {
-                struct Blob b;
-                b.x = get_object_centroid_x(channel, i);
-                b.y = get_object_centroid_y(channel, i);
-                b.size = get_object_area(channel, i);
-                b.confidence = get_object_confidence(channel, i);
-                A[i] = b;
-                i++;
-            }
-            // array built!
-            // combine blobs that are within x pixels of each other
-            group_blobs(A, n_blobs, 5);
-            // sort array: largest to smallest blobs
-            qsort(A, n_blobs, sizeof(struct Blob), compare);
-
-            // TRACK ONCE FOUND
-            // turn towars given blob So it is at least centered within the given x(0-1) of the screen
-            bool turning = true;
-            turning = turn_to_blob(A[0], 0.05);
-
-            // APPROACH
-            if (!turning)
-            	drive(200, 50);
-        } else { // no blobs seen!
-            color_count = 0;
-            if (color_found == false) {
-                // if we have not yet seen the color turn a bit to search
-                if (count == 5) {
-                    turn(-1, 200, 50);
-                    msleep(150);
-                    count = 0;
-                }
-            } else { // cant see the color blob
-                // make sure blob is really gone for at least 5 frames!
-                if (count == 5) {
-                    // (must be too close/at the blob) - STOP and return
-                    halt();
-                    // printf("Arrived at Color [channel: %d]\n", channel);
-                    return;
-                }
-            }
-        }
-    }
-
-    // Closes the connection to the camera
-    camera_close();
 }
 
 /*
@@ -487,7 +417,7 @@ void seek_color(int channel){
 */
 void open_gripper() {
     enable_servo(1);
-    set_servo_position(1, 2000);
+    set_servo_position(1, 1500);
     msleep(1000);
     disable_servo(1);
 }
@@ -501,61 +431,163 @@ void open_gripper() {
 */
 void close_gripper() {
     enable_servo(1);
-    set_servo_position(1, 600);
+    set_servo_position(1, 1000);
     msleep(1000);
     disable_servo(1);
 }
 
+bool approach_color(struct Robot *r, int channel) {
+    camera_open_black();
+
+    bool color_found = false;
+    int color_count = 0; // counts consecutive frames blob appears
+    int empty_count = 0; // counts connsecutive frames w/ no blobs
+	struct Blob lastBlob;
+    
+    bool done = false;
+    bool turning = true;
+    while(!done) {
+        empty_count++;
+        if (camera_update() == 0) {
+        	printf("snapshot failed!");
+            continue;
+        }
+
+        // SEARCH FOR PARTICULAR COLOR
+        int n_blobs = get_object_count(channel);
+        if(n_blobs > 0) {  // does the camera see at least 1 blob?
+            empty_count = 0; // reset num of empty frames
+            if (color_found == false) { // if we havent seen color for last 5 frames
+                color_count++;  // incrase num frames we've consecutively seen this color
+                if (color_count > 5) {  // if blob exists for more than 5 consecutive frames
+                    color_found = true;
+                }
+            }
+            if (color_found == true) { // we've seen the color for at least 5 frames
+                // build array of Blobs
+                int i = 0;
+                struct Blob A[n_blobs];
+                while (i < n_blobs) {
+                    struct Blob b;
+                    b.x = get_object_centroid_x(channel, i);
+                    b.y = get_object_centroid_y(channel, i);
+                    b.size = get_object_area(channel, i);
+                    b.confidence = get_object_confidence(channel, i);
+                    A[i] = b;
+                    i++;
+                }
+                // array built!
+                // combine blobs that are within x pixels of each other
+                group_blobs(A, n_blobs, 5);
+                // sort array: largest to smallest blobs
+                qsort(A, n_blobs, sizeof(struct Blob), compare);
+
+                // TURN TO FACE THE BLOB
+                turning = turn_to_blob(r, A[0], 0.05); // place blob in middle 20% of screen
+                lastBlob = A[0];
+            }
+        } else { // no blobs seen this snapshot!
+            color_count = 0; // reset num of frames we've connsecutively seen the color
+            if (empty_count > 10) { // haven't seen any sign of color in last 10 frames
+                camera_close();
+                return false; // DIDNT SEE THE COLOR :(
+            }
+        }
+        if (!turning && lastBlob.size < 4000) {
+        	robot_drive(r, 100, 1);
+        }
+        if (!turning && lastBlob.size >= 1600) {
+            done = true;
+        }
+    }
+    // we are now turned towards the color!
+    // move towards it based on it's size
+    // printf("SIZE OF BLOB: %d", lastBlob.size);
+    camera_close();
+    return true; // now at the color
+}
+
+void grab_trash(struct Robot *r) {
+    // Find color of trash can
+    // Turn to face trash more precisely
+    if (approach_color(r, RED)) {
+        open_gripper();
+        // approach
+        robot_drive(r, 300, 6);
+        robot_drive(r, 100, 3.5);
+        close_gripper();
+        robot_drive(r, 300, -9.5);
+    } else {
+    	printf("trash not found");
+    }
+}
+
 int main(int argc, char* argv[]) {
     printf("Hello World\n");
-
-    int color_seek = RED;
     enable_servo(0);
-    set_servo_position(0, 850);
+    set_servo_position(0, 800);
 
     struct Robot r;
     r.x=0;
     r.y=0;
     r.theta=PI/2; // starts facing 'upwards' in world frame
+	
+    printf("A: movement test\nB:Gripper test\n");
+    bool choosing = true;
+    int method = 1;
+    while(choosing) {
+        if (a_button_clicked()) {
+            method = 1;
+            choosing = false;
+            break;
+        }
+        if (b_button_clicked()) {
+            method = 2;
+            choosing = false;
+            break;
+        }
+    }
+    switch(method) {
+        case 1:
+            // MOVEMENT TEST CASE
+            printf("case1\n");
+            robot_turn(&r, 300, PI/2, true); // SHOULD TURN 90deg LEFT
+            robot_drive(&r, 300, 5); // SHOULD DRIVE FORWARD 5cm
+            print_robot(&r); // SHOULD BE (-5, 0), 3.14 (180deg); (facing 'left')
+            msleep(4000);
 
-    
-    printf("case1\n");
-    robot_turn(&r, 300, PI/2, true); // SHOULD TURN 90deg LEFT
-    robot_drive(&r, 300, 10); // SHOULD DRIVE FORWARD 10cm
-    print_robot(&r); // SHOULD BE (-10, 0), 3.14 (180deg); (facing 'left')
-    msleep(4000);
+            printf("case2\n");
+            robot_turn(&r, 300, PI/2, false); // SHOULD TURN TO FACE 'upwards' (90deg relative)
+            robot_turn(&r, 300, -PI/6, true); // SHOULD TURN 30deg RIGHT (
+            robot_drive(&r, 300, 10); // SHOULD DRIVE FORWARDS 10cm
+            print_robot(&r); // SHOULD BE (0, 8.66), 1.04 (60deg); (facing /^ this way)
+            msleep(4000);
 
-    printf("case2\n");
-    robot_turn(&r, 300, PI/2, false); // SHOULD TURN TO FACE 'upwards' (90deg relative)
-    robot_turn(&r, 300, -PI/6, true); // SHOULD TURN 30deg RIGHT (
-    robot_drive(&r, 300, 20); // SHOULD DRIVE FORWARDS 20cm
-    print_robot(&r); // SHOULD BE (0, 17.3), 1.04 (60deg); (facing /^ this way)
-    msleep(4000);
-
-    printf("case3\n");
-    robot_turn(&r, 300, 3*PI/2, false); // SHOULD TURN TO FACE 'downwards'
-    robot_drive(&r, 300, -10); // SHOULD DRIVE BACKWARDS 10cm
-    print_robot(&r); // SHOULD BE (0, 7.3), -0.78 (-90deg); (facing 'down')
-    
+            printf("case3\n");
+            robot_turn(&r, 300, 3*PI/2, false); // SHOULD TURN TO FACE 'downwards'
+            robot_turn(&r, 300, PI/2, false); // SHOULD TURN TO FACE 'upwards'
+            robot_drive(&r, 300, -10); // SHOULD DRIVE BACKWARDS 10cm
+            print_robot(&r); // SHOULD BE (0, -1.33), -0.78 (-90deg); (facing 'down')
+            break;
+        case 2:
+            grab_trash(&r);
+    		print_robot(&r);
+            break;
+        default:
+            printf("pass");
+    }
+            
     
     /*
-    // PART 1 LAB 4
-    seek_color(color_seek);
-
-    msleep(500);
-
-    // PART 2 LAB 4
-    // GRAB BLOCK
-    open_gripper();
-    drive(1200, 50);
-    close_gripper();
-    drive(1500, -50);
-    // FIND SIMILAR COLOR
-    seek_color(color_seek);
-    // PLACE TOGETHER
-    open_gripper();
-    drive(1500, -50);
-    close_gripper();
+    // SIZE OF BLOB TEST
+    camera_open_black();
+    while(1){
+    	camera_update();
+        int n_blobs = get_object_count(RED);
+        if(n_blobs > 0) {
+            printf("%d\n", get_object_area(RED, 0));
+        }
+    }
     */
 
     disable_servo(0);
