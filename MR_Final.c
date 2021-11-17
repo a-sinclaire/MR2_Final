@@ -33,6 +33,7 @@
 **                                  Added functions to move robot precisly through the world
 **                                  Added function to grab trash located in front of robot (iffy)
 **      17Nov2021   Sam Laderoute   Now using IR dist sensor instead of blob size b/c blob size freakin sucks
+**                                  Removed unused functions, cleaned and commented code tiny bit
 **
 */
 
@@ -333,57 +334,6 @@ void group_blobs(struct Blob *arr, int len, double threshold) {
 }
 
 /*
-** Function:    halt
-** ----------------------
-** stops the robot
-**
-** returns: void
-*/
-void halt() {
-	motor(0, 0);
-    motor(1, 0);
-}
-
-/*
-** Function:    turn
-** ----------------------
-** turns the robot in place for [mdur] millisecs at [speed].
-**      if [mdur] = -1 then duration is ignored and the robot
-**      will continue to spin until otherwise directed
-**
-** dir: the direction to turn. 1 = left, -1 = right
-** mdur: the number of milliseconds to turn for
-** speed: the speed at which the wheels turn (in range 0-100)
-**
-** returns: void
-*/
-void turn(int dir, int mdur, int speed) {
-    motor(0, dir*-speed);
-    motor(1, dir*speed);
-    if (mdur != -1) {
-    	msleep(mdur);
-    	halt();
-    }
-}
-
-/*
-** Function:    drive
-** ----------------------
-** drives the robot forward for [mdur] millisecs at [speed].
-**
-** mdur: the number of milliseconds to drive for
-** speed: the speed at which the wheels turn (range 0-100)
-**
-** returns: void
-*/
-void drive(int mdur, int speed){
-    motor(0, speed);
-    motor(1, speed);
-    msleep(mdur);
-    halt();
-}
-
-/*
 ** Function:    turn_to_blob
 ** ----------------------
 ** turns the robot towards the given blob.
@@ -439,6 +389,17 @@ void close_gripper() {
     disable_servo(1);
 }
 
+/*
+** Function:    approach_color
+** ----------------------
+** We expect the robot to be looking at this color when the func is called
+** The robot then turns to face it and moves closer to it within some thresh
+**
+** r: the robot we are giving the command to
+** channel: the color we are approaching
+**
+** returns: false if color not found, true once color is approached
+*/
 bool approach_color(struct Robot *r, int channel) {
     camera_open_black();
 
@@ -506,6 +467,16 @@ bool approach_color(struct Robot *r, int channel) {
     return true; // now at the color
 }
 
+/*
+** Function:    grab_trash
+** ----------------------
+** We assume robot is facing trash. This has robot align to trash.
+** Open gripper, approach, close gripper (grasp) the backup a bit.
+**
+** r: the robot we are giving command to
+**
+** returns: void
+*/
 void grab_trash(struct Robot *r) {
     // Find color of trash can
     // Turn to face trash more precisely
