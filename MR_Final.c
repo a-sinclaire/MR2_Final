@@ -32,6 +32,7 @@
 **                                  Created Robot struct to handle robot pos and internal sensing
 **                                  Added functions to move robot precisly through the world
 **                                  Added function to grab trash located in front of robot (iffy)
+**      17Nov2021   Sam Laderoute   Now using IR dist sensor instead of blob size b/c blob size freakin sucks
 **
 */
 
@@ -40,7 +41,9 @@
 **
 ** Link to useful docs:
 ** https://www.kipr.org/doc/group__motor.html?fbclid=IwAR2uX9eOVENJE8vOZK1iirCafg8F4ECy8SwURf0x6tBJQY4kRpMALidsRIE#gafce5cf37833e487343ece5256fe66d37
-**      "There are approximately 1500 ticks per motor revolution"
+**      "There are approximately 1500 ticks per motor revolution" (actually 2k)
+**
+** WTH. SOMETIMES THE MOTORS JUST DONT ACTIVATE? I DONT GET IT. BOTH MOTOTRS GET THE SAME EXACT INSTRUCTION, BUT ONLY ONE OF THEM MOVES?
 **
 ** - use size of blob for logic, check min size?
 ** - use confidence level, min conf?
@@ -194,7 +197,7 @@ void robot_drive(struct Robot *r, int speed, double cm) {
     // wait for movement to complete
     while(!get_motor_done(0) || !get_motor_done(1)){
     }
-    
+
     // update robot pos
     r->x += cm*cos(r->theta);
     r->y += cm*sin(r->theta);
@@ -439,10 +442,10 @@ void close_gripper() {
 bool approach_color(struct Robot *r, int channel) {
     camera_open_black();
 
+    int ir_thresh = 2600;
     bool color_found = false;
     int color_count = 0; // counts consecutive frames blob appears
     int empty_count = 0; // counts connsecutive frames w/ no blobs
-	struct Blob lastBlob;
     
     bool done = false;
     bool turning = true;
@@ -484,7 +487,6 @@ bool approach_color(struct Robot *r, int channel) {
 
                 // TURN TO FACE THE BLOB
                 turning = turn_to_blob(r, A[0], 0.05); // place blob in middle 20% of screen
-                lastBlob = A[0];
             }
         } else { // no blobs seen this snapshot!
             color_count = 0; // reset num of frames we've connsecutively seen the color
@@ -493,16 +495,13 @@ bool approach_color(struct Robot *r, int channel) {
                 return false; // DIDNT SEE THE COLOR :(
             }
         }
-        if (!turning && lastBlob.size < 4000) {
+        if (!turning && analog(0) < ir_thresh) {
         	robot_drive(r, 100, 1);
         }
-        if (!turning && lastBlob.size >= 1600) {
+        if (!turning && analog(0) >= ir_thresh) {
             done = true;
         }
     }
-    // we are now turned towards the color!
-    // move towards it based on it's size
-    // printf("SIZE OF BLOB: %d", lastBlob.size);
     camera_close();
     return true; // now at the color
 }
@@ -513,10 +512,10 @@ void grab_trash(struct Robot *r) {
     if (approach_color(r, RED)) {
         open_gripper();
         // approach
-        robot_drive(r, 300, 6);
-        robot_drive(r, 100, 3.5);
+        robot_drive(r, 300, 4.5);
+        robot_drive(r, 100, 3);
         close_gripper();
-        robot_drive(r, 300, -9.5);
+        robot_drive(r, 300, -7.5);
     } else {
     	printf("trash not found");
     }
