@@ -33,7 +33,10 @@
 **                                  Added functions to move robot precisly through the world
 **                                  Added function to grab trash located in front of robot (iffy)
 **      17Nov2021   Sam Laderoute   Now using IR dist sensor instead of blob size b/c blob size freakin sucks
-**                                  Removed unused functions, cleaned and commented code tiny bit
+**		18Nov2021	Sam Laderoute	Calculating turn constant using len between wheels and wheel circum now.
+**									(Those values now stored in robot)
+**                                  Added delay to movement control to fix issue where wheels would fail sometimes
+**                                  Didnt reliably fix -- must be hardware issue.
 **
 */
 
@@ -42,9 +45,7 @@
 **
 ** Link to useful docs:
 ** https://www.kipr.org/doc/group__motor.html?fbclid=IwAR2uX9eOVENJE8vOZK1iirCafg8F4ECy8SwURf0x6tBJQY4kRpMALidsRIE#gafce5cf37833e487343ece5256fe66d37
-**      "There are approximately 1500 ticks per motor revolution" (actually 2k)
-**
-** WTH. SOMETIMES THE MOTORS JUST DONT ACTIVATE? I DONT GET IT. BOTH MOTOTRS GET THE SAME EXACT INSTRUCTION, BUT ONLY ONE OF THEM MOVES?
+**      "There are approximately 1500 ticks per motor revolution"
 **
 ** - use size of blob for logic, check min size?
 ** - use confidence level, min conf?
@@ -75,6 +76,8 @@
 
 #define RED 0
 #define PURPLE 1
+#define Lmot 0
+#define Rmot 3
 #define WIDTH 159
 #define HEIGHT 119
 #define PI 3.14159265
@@ -126,6 +129,8 @@ struct Robot {
     double theta;
     double radius;
     struct Location obstacles[10];
+    double w_circumfrence;
+    double base_len;
 };
 
 /*
@@ -175,6 +180,18 @@ double abs_f(double v) {
 }
 
 /*
+** Function:    halt
+** ----------------------
+** stops the robot
+**
+** returns: void
+*/
+void halt() {
+	motor(Lmot, 0);
+    motor(Rmot, 0);
+}
+
+/*
 ** Function:    robot_drive
 ** ----------------------
 ** moves the robot forward or backward a precise amount
@@ -189,15 +206,16 @@ double abs_f(double v) {
 void robot_drive(struct Robot *r, int speed, double cm) {
     // "There are approximately 1500 ticks per motor revolution" -- actually it 2k
     int N = 2000; // num ticks in 1 full rotation of wheels
-    double circumfrence = 22.0; // cm
-    int ticks = (int)((N/circumfrence)*cm); // ~ 90ticks per cm
+    int ticks = (int)((N/r->w_circumfrence)*cm); // ~ 90ticks per cm
     //printf("moving  speed:%d  ticks:%d  cm:%f\n", speed, ticks, cm);
-    move_relative_position(0, speed, ticks);
-    move_relative_position(1, speed, ticks);
+    move_relative_position(Lmot, speed, ticks);
+    move_relative_position(Rmot, speed, ticks);
 	
     // wait for movement to complete
-    while(!get_motor_done(0) || !get_motor_done(1)){
+    while(!get_motor_done(Lmot) || !get_motor_done(Rmot)){
     }
+    halt();
+    // msleep(200); // without this sleep sometimes the next move event fails
 
     // update robot pos
     r->x += cm*cos(r->theta);
@@ -234,15 +252,18 @@ void robot_turn(struct Robot *r, int speed, double d_angle, bool isRelative) {
     // "There are approximately 1500 ticks per motor revolution" -- actually it 2k
     int Ldir = (d_angle < 0) ? 1 : -1;
     int Rdir = -Ldir;
-    double N = 2000.0 * 1.35; // N is total num ticks in 1 full rotation of robot ### idk why i need constant 1.35 (i made up)
+    double turn_const = (PI*r->base_len)/(r->w_circumfrence*2);
+    double N = 2000.0 * turn_const; // N is total num ticks in 1 full rotation of robot ### idk why i need constant 1.35 (i made up)
     int ticks = (int)(N*abs_f(d_angle)/PI);
     //printf("turning %f  speed:%d  ticks:%d  Ldir:%d  Rdir:%d\n",rad2deg(d_angle), speed, ticks, Ldir, Rdir);
-    move_relative_position(0, speed, ticks*Ldir);
-    move_relative_position(1, speed, ticks*Rdir);
+    move_relative_position(Lmot, speed, ticks*Ldir);
+    move_relative_position(Rmot, speed, ticks*Rdir);
     
     // wait for movement to complete
-	while(!get_motor_done(0) || !get_motor_done(1)){
+	while(!get_motor_done(Lmot) || !get_motor_done(Rmot)){
     }
+    halt();
+    // msleep(200); // without this sleep sometimes the next move event fails
 
     // update robot angle
     r->theta += d_angle;
@@ -389,17 +410,6 @@ void close_gripper() {
     disable_servo(1);
 }
 
-/*
-** Function:    approach_color
-** ----------------------
-** We expect the robot to be looking at this color when the func is called
-** The robot then turns to face it and moves closer to it within some thresh
-**
-** r: the robot we are giving the command to
-** channel: the color we are approaching
-**
-** returns: false if color not found, true once color is approached
-*/
 bool approach_color(struct Robot *r, int channel) {
     camera_open_black();
 
@@ -467,16 +477,6 @@ bool approach_color(struct Robot *r, int channel) {
     return true; // now at the color
 }
 
-/*
-** Function:    grab_trash
-** ----------------------
-** We assume robot is facing trash. This has robot align to trash.
-** Open gripper, approach, close gripper (grasp) the backup a bit.
-**
-** r: the robot we are giving command to
-**
-** returns: void
-*/
 void grab_trash(struct Robot *r) {
     // Find color of trash can
     // Turn to face trash more precisely
@@ -501,8 +501,10 @@ int main(int argc, char* argv[]) {
     r.x=0;
     r.y=0;
     r.theta=PI/2; // starts facing 'upwards' in world frame
+    r.w_circumfrence=22.0; // cm
+    r.base_len=19.0; // cm
 	
-    printf("A: movement test\nB:Gripper test\n");
+    printf("A: movement test\nB:Gripper test\nC:back and forth\n");
     bool choosing = true;
     int method = 1;
     while(choosing) {
@@ -516,7 +518,13 @@ int main(int argc, char* argv[]) {
             choosing = false;
             break;
         }
+        if (c_button_clicked()) {
+        	method = 3;
+            choosing = false;
+            break;
+        }
     }
+    bool going = true;
     switch(method) {
         case 1:
             // MOVEMENT TEST CASE
@@ -542,6 +550,15 @@ int main(int argc, char* argv[]) {
         case 2:
             grab_trash(&r);
     		print_robot(&r);
+            break;
+        case 3:
+            while (going) {
+            	robot_drive(&r, 300, 10);
+                //msleep(200);
+                robot_drive(&r, 300, -10);
+                //msleep(200);
+                if (c_button_clicked()) going=false;
+            }
             break;
         default:
             printf("pass");
